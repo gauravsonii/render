@@ -43,21 +43,30 @@ from ai import genText, genImage, getImagePrompt
 
 app = Flask(__name__)
 
-auth = tweepy.OAuthHandler(config.CONSUMER_KEY, config.CONSUMER_SECRET)
-auth.set_access_token(config.ACCESS_TOKEN, config.ACCESS_TOKEN_SECRET)
-
-api = tweepy.API(auth)
-
-client = tweepy.Client(
-    config.BEARER_TOKEN,
-    config.CONSUMER_KEY,
-    config.CONSUMER_SECRET,
-    config.ACCESS_TOKEN,
-    config.ACCESS_TOKEN_SECRET,
-    wait_on_rate_limit=True
-)
-
 SECRET_BEARER_TOKEN = config.SECRET_KEY
+
+# Initialize Twitter API clients lazily to avoid errors if env vars are missing
+# These will be initialized only when needed in the tweet route
+def get_twitter_api():
+    """Get initialized Twitter API v1.1 client"""
+    if not config.CONSUMER_KEY or not config.CONSUMER_SECRET:
+        raise ValueError("Twitter credentials (CONSUMER_KEY, CONSUMER_SECRET) are not configured")
+    auth = tweepy.OAuthHandler(config.CONSUMER_KEY, config.CONSUMER_SECRET)
+    auth.set_access_token(config.ACCESS_TOKEN, config.ACCESS_TOKEN_SECRET)
+    return tweepy.API(auth)
+
+def get_twitter_client():
+    """Get initialized Twitter API v2 client"""
+    if not config.BEARER_TOKEN or not config.CONSUMER_KEY:
+        raise ValueError("Twitter credentials (BEARER_TOKEN, CONSUMER_KEY) are not configured")
+    return tweepy.Client(
+        config.BEARER_TOKEN,
+        config.CONSUMER_KEY,
+        config.CONSUMER_SECRET,
+        config.ACCESS_TOKEN,
+        config.ACCESS_TOKEN_SECRET,
+        wait_on_rate_limit=True
+    )
 
 
 @app.route("/")
@@ -74,6 +83,10 @@ def fav():
 @require_bearer_token(SECRET_BEARER_TOKEN)
 def tweet():
     try:
+        # Initialize Twitter clients when needed
+        api = get_twitter_api()
+        client = get_twitter_client()
+        
         generatedText = genText()
         imagePrompt = getImagePrompt(generatedText)
         generatedImage, generatedImageName = genImage(imagePrompt)
@@ -93,6 +106,8 @@ def tweet():
         }
         return jsonify(response)
 
+    except ValueError as e:
+        return jsonify({'error': f'Configuration error: {str(e)}. Please set environment variables in Vercel dashboard.'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
